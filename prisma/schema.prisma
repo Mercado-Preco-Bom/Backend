@@ -1,14 +1,63 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider   = "postgresql"
+  url        = env("DATABASE_URL")
+  extensions = [postgis]
+}
+
+enum Role {
+  ADMIN
+  CASHIER
+  DRIVER
+}
+
+model User {
+  id        String   @id @default(uuid())
+  name      String
+  email     String   @unique
+  password  String
+  role      Role
+  createdAt DateTime @default(now())
+
+  deliveries Delivery[] @relation("DriverDeliveries")
+}
+
+model Customer {
+  id           String   @id @default(uuid())
+  name         String
+  phone        String?
+  street       String
+  number       String
+  neighborhood String
+  reference    String?
+  createdAt    DateTime @default(now())
+
+  coordinates Unsupported("geometry(Point, 4326)")?
+
+  deliveries Delivery[]
+}
+
+model Delivery {
+  id              String   @id @default(uuid())
+  boxCount        Int
+  paymentMethod   String   // CASH, PIX, CREDIT_CARD
+  changeFor       Float?
+  status          String   @default("PENDING") // PENDING, IN_TRANSIT, DELIVERED
+  
+  createdAt       DateTime @default(now())
+  startedAt       DateTime?
+  finishedAt      DateTime?
+
+  startCoordinates Unsupported("geometry(Point, 4326)")?
+  endCoordinates   Unsupported("geometry(Point, 4326)")?
+
+  customerId      String
+  customer        Customer @relation(fields: [customerId], references: [id])
+  
+  driverId        String?
+  driver          User?    @relation("DriverDeliveries", fields: [driverId], references: [id])
 }
