@@ -157,4 +157,29 @@ export class DeliveryController {
       return res.status(500).json({ error: 'Erro ao excluir entrega.' });
     }
   }
+
+  // PUT - Atualiza a entrega, como adicionar motorista
+  async update(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const { boxCount, paymentMethod, changeFor, status, customerId, driverId } = req.body;
+
+      const updatedDelivery = await prisma.delivery.update({
+        where: { id },
+        data: {
+          boxCount,
+          paymentMethod,
+          changeFor,
+          status,
+          customerId,
+          driverId,
+        },
+      });
+
+      return res.json(updatedDelivery);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Erro ao atualizar a entrega.' });
+    }
+  }
 }

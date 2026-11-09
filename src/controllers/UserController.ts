@@ -85,4 +85,42 @@ export class UserController {
       return res.status(500).json({ error: 'Erro ao deletar usuario.' });
     }
   }
+
+  // Rota Login
+  async login(req: Request, res: Response) {
+    try {
+      const { email, password } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
+      }
+
+      // Procura se o email existe no banco(Se o usuario existe)
+      const user = await prisma.user.findUnique({
+        where: { email },
+      });
+
+      if (!user) {
+        return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
+      }
+
+      // Ainda sem token, sem validação de seção
+      if (user.password !== password) {
+        return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
+      }
+
+      // Reposta com os dados do usuario com a cargo dele
+      return res.json({
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          role: user.role, // ADMIN, DRIVER, CAIXA
+        },
+      });
+    } catch (error) {
+      console.error('Erro no login:', error);
+      return res.status(500).json({ error: 'Erro interno no servidor ao fazer login.' });
+    }
+  }
 }

@@ -14,5 +14,7 @@ router.get('/users/:id', userController.getById);
 router.put('/users/:id', userController.update);
 // Deletar usuarios
 router.delete('/users/:id', userController.delete);
+//Rota de login do usuario
+router.post('/login', userController.login);
 
 export default router;

@@ -14,6 +14,8 @@ router.put('/deliveries/:id/start', deliveryController.start);
 router.put('/deliveries/:id/finish', deliveryController.finish);
 //Rota para Buscar as entregas por ID
 router.get('/deliveries/:id', deliveryController.getById);
+//Atualizar uma rota em especifico
+router.put('/deliveries/:id', deliveryController.update);
 // Deletar Entregas
 router.delete('/deliveries/:id', deliveryController.delete);
 export default router;
