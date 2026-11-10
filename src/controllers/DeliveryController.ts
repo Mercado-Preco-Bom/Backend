@@ -16,7 +16,7 @@ export class DeliveryController {
           paymentMethod,
           changeFor,
           customerId,
-          driverId, // Pode ser null se a entrega ainda não tiver motorista
+          driverId,
         },
       });
 
@@ -82,7 +82,7 @@ export class DeliveryController {
       const { id } = req.params;
       const { latitude, longitude } = req.body;
 
-      // bUSCA A ENTRE PARA VER SE JA FOI INICIADA
+      // bUSCA A ENTREGA PARA VER SE JA FOI INICIADA
       const delivery = await prisma.delivery.findUnique({ where: { id } });
 
       // IFS PARA VALIDAR ISSO

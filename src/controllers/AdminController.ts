@@ -26,7 +26,7 @@ export class AdminController {
         select: { id: true, name: true },
       });
 
-      // Calcula as métricas
+      // Calcula as métricas (Entregas completas, total de entregas, quantas faltam ser entregues)
       const totalToday = deliveries.length;
       const completed = deliveries.filter((d) => d.status === 'DELIVERED').length;
       const pending = totalToday - completed;
@@ -37,7 +37,7 @@ export class AdminController {
           totalToday,
           completed,
           pending,
-          avgIdleTime: 15, // Fixo por enquanto, até termos lógica de cálculo de tempo
+          avgIdleTime: 15,
           avgRouteTime: 21,
         },
         drivers: drivers.map((driver) => {

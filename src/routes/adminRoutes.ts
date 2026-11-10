@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { AdminController } from '../controllers/AdminController';
 
 const router = Router();
-const adminController = new AdminController(); // ← Nome corrigido aqui
+const adminController = new AdminController();
 
 router.get('/admin/dashboard', adminController.getDashboard);
 
