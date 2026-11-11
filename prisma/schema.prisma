@@ -23,6 +23,12 @@ model User {
   role      Role
   createdAt DateTime @default(now())
 
+  // Última posição conhecida (o app do motorista atualiza). Usada para registrar
+  // "onde o motorista estava" quando uma entrega é atribuída a ele.
+  lastLatitude   Float?
+  lastLongitude  Float?
+  lastLocationAt DateTime?
+
   deliveries Delivery[] @relation("DriverDeliveries")
 }
 
@@ -42,22 +48,51 @@ model Customer {
 }
 
 model Delivery {
-  id              String   @id @default(uuid())
-  boxCount        Int
-  paymentMethod   String   // CASH, PIX, CREDIT_CARD
-  changeFor       Float?
-  status          String   @default("PENDING") // PENDING, IN_TRANSIT, DELIVERED
-  
-  createdAt       DateTime @default(now())
-  startedAt       DateTime?
-  finishedAt      DateTime?
+  id            String  @id @default(uuid())
+  boxCount      Int
+  paymentMethod String // CASH, PIX, CREDIT_CARD
+  changeFor     Float?
+  status        String  @default("PENDING") // PENDING, IN_TRANSIT, DELIVERED
 
-  startCoordinates Unsupported("geometry(Point, 4326)")?
-  endCoordinates   Unsupported("geometry(Point, 4326)")?
+  createdAt DateTime @default(now())
 
-  customerId      String
-  customer        Customer @relation(fields: [customerId], references: [id])
-  
-  driverId        String?
-  driver          User?    @relation("DriverDeliveries", fields: [driverId], references: [id])
+  // 1) ATRIBUIÇÃO: quando a entrega foi entregue a esse motorista e onde ele estava
+  assignedAt        DateTime?
+  assignedLatitude  Float?
+  assignedLongitude Float?
+
+  // 2) INÍCIO: quando o motorista apertou "Iniciar" e onde estava
+  startedAt      DateTime?
+  startLatitude  Float?
+  startLongitude Float?
+
+  // 3) FIM: quando o motorista apertou "Finalizar" e onde estava
+  finishedAt   DateTime?
+  endLatitude  Float?
+  endLongitude Float?
+
+  customerId String
+  customer   Customer @relation(fields: [customerId], references: [id])
+
+  driverId String?
+  driver   User?   @relation("DriverDeliveries", fields: [driverId], references: [id])
+
+  // Trajeto percorrido (pontos de GPS enquanto a entrega está em rota)
+  trackPoints DeliveryTrackPoint[]
+}
+
+model DeliveryTrackPoint {
+  id         String   @id @default(uuid())
+  deliveryId String
+  delivery   Delivery @relation(fields: [deliveryId], references: [id], onDelete: Cascade)
+
+  latitude  Float
+  longitude Float
+  speed     Float? // m/s
+  heading   Float? // graus
+  accuracy  Float? // metros
+
+  recordedAt DateTime // hora em que o GPS do celular registrou o ponto
+
+  @@index([deliveryId, recordedAt])
 }

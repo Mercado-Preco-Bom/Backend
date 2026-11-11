@@ -12,6 +12,8 @@ router.get('/users', userController.list);
 router.get('/users/:id', userController.getById);
 //Atualizar usuarios
 router.put('/users/:id', userController.update);
+// Motorista atualiza a própria localização
+router.put('/users/:id/location', userController.updateLocation);
 // Deletar usuarios
 router.delete('/users/:id', userController.delete);
 //Rota de login do usuario

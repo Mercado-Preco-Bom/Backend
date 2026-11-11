@@ -12,6 +12,10 @@ router.get('/deliveries', deliveryController.list);
 router.put('/deliveries/:id/start', deliveryController.start);
 //Rota para finalizar a entrega
 router.put('/deliveries/:id/finish', deliveryController.finish);
+// Motorista envia os pontos de GPS do trajeto (enquanto em rota)
+router.post('/deliveries/:id/track', deliveryController.track);
+// Linha do tempo completa da entrega para o admin (atribuição, início, fim e trajeto)
+router.get('/deliveries/:id/tracking', deliveryController.tracking);
 //Rota para Buscar as entregas por ID
 router.get('/deliveries/:id', deliveryController.getById);
 //Atualizar uma rota em especifico

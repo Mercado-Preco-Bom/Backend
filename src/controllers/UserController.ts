@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
+import { parseCoords } from '../utils/location';
 
 const prisma = new PrismaClient();
 
@@ -83,6 +84,32 @@ export class UserController {
     } catch (error) {
       console.error(error);
       return res.status(500).json({ error: 'Erro ao deletar usuario.' });
+    }
+  }
+
+  // PUT - App do motorista informa a posição atual (usada ao atribuir entregas e no mapa do admin)
+  async updateLocation(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const coords = parseCoords(req.body.latitude, req.body.longitude);
+
+      if (!coords) {
+        return res.status(400).json({ error: 'Latitude/longitude inválidas.' });
+      }
+
+      await prisma.user.update({
+        where: { id },
+        data: {
+          lastLatitude: coords.latitude,
+          lastLongitude: coords.longitude,
+          lastLocationAt: new Date(),
+        },
+      });
+
+      return res.status(204).send();
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Erro ao atualizar a localização.' });
     }
   }
 
