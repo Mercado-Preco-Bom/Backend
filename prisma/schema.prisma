@@ -22,9 +22,8 @@ model User {
   password  String
   role      Role
   createdAt DateTime @default(now())
-
-  // Última posição conhecida (o app do motorista atualiza). Usada para registrar
-  // "onde o motorista estava" quando uma entrega é atribuída a ele.
+  
+  // Ultima localização do motorista
   lastLatitude   Float?
   lastLongitude  Float?
   lastLocationAt DateTime?

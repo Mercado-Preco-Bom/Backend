@@ -10,7 +10,6 @@ export class CustomerController {
       const { name, phone, street, number, neighborhood, reference } = req.body;
 
       // Cria o cliente no banco.
-      // Nota: As coordenadas GPS serão atualizadas depois quando integrarmos o mapa.
       const newCustomer = await prisma.customer.create({
         data: {
           name,

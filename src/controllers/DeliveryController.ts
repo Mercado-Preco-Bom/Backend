@@ -4,11 +4,8 @@ import { parseCoords, parseEventDate, secondsBetween, toNumber } from '../utils/
 
 const prisma = new PrismaClient();
 
-// Se a última posição do motorista for mais antiga que isso, não usamos como
-// "local onde ele estava quando recebeu a entrega" (seria um dado enganoso).
 const ASSIGN_LOCATION_MAX_AGE_MS = 2 * 60 * 60 * 1000;
 
-// Nunca devolver a senha do motorista nas respostas de entrega
 const driverSelect = {
   id: true,
   name: true,
@@ -19,8 +16,6 @@ const driverSelect = {
   lastLocationAt: true,
 };
 
-// Monta os campos de "atribuição" (hora + onde o motorista estava) quando uma entrega
-// é entregue a um motorista.
 async function buildAssignmentData(driverId: string) {
   const driver = await prisma.user.findUnique({
     where: { id: driverId },
@@ -87,7 +82,6 @@ export class DeliveryController {
   }
 
   // PUT - Motorista inicia a entrega
-  // body: { driverId, latitude, longitude, accuracy?, occurredAt? }
   async start(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -108,7 +102,6 @@ export class DeliveryController {
         return res.status(409).json({ error: 'Esta entrega já foi finalizada.' });
       }
 
-      // Já iniciada (ex.: ação reenviada pela fila offline): não sobrescreve a hora/local originais
       if (delivery.status === 'IN_TRANSIT' && delivery.startedAt !== null) {
         return res.json({
           message: 'Entrega já estava em rota.',
@@ -119,7 +112,6 @@ export class DeliveryController {
 
       const effectiveDriverId = delivery.driverId ?? driverId ?? null;
 
-      // Se o motorista pegou uma entrega que ninguém tinha atribuído, a atribuição = início
       const assignmentFallback = delivery.assignedAt
         ? {}
         : {
@@ -164,7 +156,6 @@ export class DeliveryController {
   }
 
   // PUT - Motorista finaliza a entrega
-  // body: { driverId?, latitude, longitude, accuracy?, occurredAt? }
   async finish(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -180,7 +171,6 @@ export class DeliveryController {
         return res.status(403).json({ error: 'Esta entrega pertence a outro motorista.' });
       }
 
-      // Já finalizada (ex.: reenvio da fila offline): responde OK sem sobrescrever nada
       if (delivery.status === 'DELIVERED') {
         return res.json({
           message: 'Entrega já estava finalizada.',
@@ -234,7 +224,6 @@ export class DeliveryController {
   }
 
   // POST - App do motorista envia os pontos de GPS enquanto a entrega está em rota
-  // body: { points: [{ latitude, longitude, speed?, heading?, accuracy?, recordedAt }] }
   async track(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -259,20 +248,28 @@ export class DeliveryController {
 
       const valid = points
         .slice(0, 200)
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        .map((p: any) => {
-          const coords = parseCoords(p?.latitude, p?.longitude);
-          if (!coords) return null;
-          return {
-            deliveryId: id,
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-            speed: toNumber(p.speed),
-            heading: toNumber(p.heading),
-            accuracy: toNumber(p.accuracy),
-            recordedAt: parseEventDate(p.recordedAt),
-          };
-        })
+        .map(
+          (p: {
+            latitude?: number | string;
+            longitude?: number | string;
+            speed?: number;
+            heading?: number;
+            accuracy?: number;
+            recordedAt?: string | Date;
+          }) => {
+            const coords = parseCoords(p?.latitude, p?.longitude);
+            if (!coords) return null;
+            return {
+              deliveryId: id,
+              latitude: coords.latitude,
+              longitude: coords.longitude,
+              speed: toNumber(p.speed),
+              heading: toNumber(p.heading),
+              accuracy: toNumber(p.accuracy),
+              recordedAt: parseEventDate(p.recordedAt),
+            };
+          },
+        )
         .filter((p): p is NonNullable<typeof p> => p !== null)
         .sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime());
 
@@ -330,7 +327,6 @@ export class DeliveryController {
         assigned: point(delivery.assignedAt, delivery.assignedLatitude, delivery.assignedLongitude),
         started: point(delivery.startedAt, delivery.startLatitude, delivery.startLongitude),
         finished: point(delivery.finishedAt, delivery.endLatitude, delivery.endLongitude),
-        // atribuída -> iniciou (tempo parado) e iniciou -> finalizou (tempo de rota)
         waitingSeconds:
           delivery.assignedAt && delivery.startedAt
             ? secondsBetween(delivery.assignedAt, delivery.startedAt)
@@ -399,10 +395,8 @@ export class DeliveryController {
         if (!current) return res.status(404).json({ error: 'Entrega não encontrada.' });
 
         if (driverId && driverId !== current.driverId) {
-          // Atribuída a um (novo) motorista: registra hora e onde ele estava
           assignment = await buildAssignmentData(driverId);
         } else if (!driverId && current.driverId) {
-          // Motorista removido
           assignment = { assignedAt: null, assignedLatitude: null, assignedLongitude: null };
         }
       }
