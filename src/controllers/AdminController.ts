@@ -3,25 +3,26 @@ import { PrismaClient } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
+const SIGNAL_LOST_THRESHOLD_MS = 2 * 60 * 1000;
+const DISCONNECTED_THRESHOLD_MS = 8 * 60 * 60 * 1000;
+
 export class AdminController {
   async getDashboard(req: Request, res: Response) {
     try {
-      // Define o inicio do dia
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
 
-      // Procura as entregas de hoje e inclui os dados do cliente e do motorista
       const deliveries = await prisma.delivery.findMany({
-        where: { createdAt: { gte: startOfDay } },
+        where: {
+          OR: [{ createdAt: { gte: startOfDay } }, { status: { not: 'DELIVERED' } }],
+        },
         include: {
           customer: true,
-          // select evita vazar a senha do motorista na resposta
           driver: { select: { id: true, name: true, email: true, role: true } },
         },
         orderBy: { createdAt: 'desc' },
       });
 
-      // Procura todos os motoristas
       const drivers = await prisma.user.findMany({
         where: { role: 'DRIVER' },
         select: {
@@ -33,14 +34,10 @@ export class AdminController {
         },
       });
 
-      // Calcula as métricas (Entregas completas, total de entregas, quantas faltam ser entregues)
       const totalToday = deliveries.length;
       const completed = deliveries.filter((d) => d.status === 'DELIVERED').length;
       const pending = totalToday - completed;
 
-      // Tempos médios REAIS (em minutos), calculados a partir das horas gravadas:
-      // - avgIdleTime: da atribuição ao motorista até ele iniciar a rota
-      // - avgRouteTime: do início até a finalização da entrega
       const avgMinutes = (values: number[]) =>
         values.length === 0
           ? 0
@@ -48,15 +45,22 @@ export class AdminController {
 
       const idleDurations = deliveries
         .filter((d) => d.assignedAt && d.startedAt)
-        .map((d) => d.startedAt!.getTime() - d.assignedAt!.getTime())
+        .map(
+          (d) =>
+            (d.startedAt ? d.startedAt.getTime() : 0) - (d.assignedAt ? d.assignedAt.getTime() : 0),
+        )
         .filter((ms) => ms >= 0);
 
       const routeDurations = deliveries
         .filter((d) => d.startedAt && d.finishedAt)
-        .map((d) => d.finishedAt!.getTime() - d.startedAt!.getTime())
+        .map(
+          (d) =>
+            (d.finishedAt ? d.finishedAt.getTime() : 0) - (d.startedAt ? d.startedAt.getTime() : 0),
+        )
         .filter((ms) => ms >= 0);
 
-      // Devolve a resposta estruturada
+      const now = Date.now();
+
       return res.json({
         metrics: {
           totalToday,
@@ -66,21 +70,35 @@ export class AdminController {
           avgRouteTime: avgMinutes(routeDurations),
         },
         drivers: drivers.map((driver) => {
-          // Verifica se o motorista tem alguma entrega em trânsito agora
           const inTransit = deliveries.find(
-            (d) => d.driverId === driver.id && d.status === 'IN_TRANSIT',
+            (d) => d.driverId === driver.id && d.status === 'IN_TRANSIT' && d.startedAt !== null,
           );
+
+          let connectionStatus: 'ONLINE' | 'SINAL_PERDIDO' | 'DESCONECTADO' = 'DESCONECTADO';
+          if (driver.lastLocationAt && driver.lastLocationAt.getTime() > 1000) {
+            const ageMs = now - driver.lastLocationAt.getTime();
+            if (ageMs <= SIGNAL_LOST_THRESHOLD_MS) {
+              connectionStatus = 'ONLINE';
+            } else if (ageMs <= DISCONNECTED_THRESHOLD_MS) {
+              connectionStatus = 'SINAL_PERDIDO';
+            }
+          }
+
           return {
             id: driver.id,
             name: driver.name,
             status: inTransit ? 'EM_ROTA' : 'DISPONIVEL',
+            connectionStatus,
             currentDelivery: inTransit || null,
             lastLocation:
               driver.lastLatitude !== null && driver.lastLongitude !== null
                 ? {
                     latitude: driver.lastLatitude,
                     longitude: driver.lastLongitude,
-                    at: driver.lastLocationAt,
+                    at:
+                      driver.lastLocationAt && driver.lastLocationAt.getTime() > 1000
+                        ? driver.lastLocationAt
+                        : null,
                   }
                 : null,
           };

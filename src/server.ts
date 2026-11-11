@@ -11,7 +11,7 @@ app.use(cors());
 app.use(express.json());
 
 // Routes de usuarios
-app.use('/api', userRoutes);
+app.use('/api/users', userRoutes);
 app.use('/api', costumerRoutes);
 app.use('/api', deliveryRoutes);
 app.use('/api', adminRoutes);

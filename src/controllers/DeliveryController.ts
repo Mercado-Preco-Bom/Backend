@@ -109,7 +109,7 @@ export class DeliveryController {
       }
 
       // Já iniciada (ex.: ação reenviada pela fila offline): não sobrescreve a hora/local originais
-      if (delivery.status === 'IN_TRANSIT') {
+      if (delivery.status === 'IN_TRANSIT' && delivery.startedAt !== null) {
         return res.json({
           message: 'Entrega já estava em rota.',
           alreadyStarted: true,

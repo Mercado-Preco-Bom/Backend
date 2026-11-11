@@ -1,11 +1,10 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { parseCoords } from '../utils/location';
+import { parseCoords, parseEventDate } from '../utils/location';
 
 const prisma = new PrismaClient();
 
 export class UserController {
-  // POST - Cria novo usuario
   async create(req: Request, res: Response) {
     try {
       const { name, email, password, role } = req.body;
@@ -31,7 +30,6 @@ export class UserController {
     }
   }
 
-  // GET - Listar todos usuarios
   async list(req: Request, res: Response) {
     try {
       const users = await prisma.user.findMany();
@@ -42,7 +40,6 @@ export class UserController {
     }
   }
 
-  // GET -Listar usuario por ID
   async getById(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -56,7 +53,6 @@ export class UserController {
     }
   }
 
-  // PUT - Editar usuario
   async update(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -74,7 +70,6 @@ export class UserController {
     }
   }
 
-  // DELETE - Deletar usuario
   async delete(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -87,7 +82,6 @@ export class UserController {
     }
   }
 
-  // PUT - App do motorista informa a posição atual (usada ao atribuir entregas e no mapa do admin)
   async updateLocation(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -97,12 +91,14 @@ export class UserController {
         return res.status(400).json({ error: 'Latitude/longitude inválidas.' });
       }
 
+      const lastLocationAt = parseEventDate(req.body.recordedAt);
+
       await prisma.user.update({
         where: { id },
         data: {
           lastLatitude: coords.latitude,
           lastLongitude: coords.longitude,
-          lastLocationAt: new Date(),
+          lastLocationAt,
         },
       });
 
@@ -113,7 +109,22 @@ export class UserController {
     }
   }
 
-  // Rota Login
+  async disconnectDriver(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      await prisma.user.update({
+        where: { id },
+        data: {
+          lastLocationAt: new Date(0),
+        },
+      });
+      return res.status(204).send();
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Erro ao desconectar motorista.' });
+    }
+  }
+
   async login(req: Request, res: Response) {
     try {
       const { email, password } = req.body;
@@ -122,27 +133,28 @@ export class UserController {
         return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
       }
 
-      // Procura se o email existe no banco(Se o usuario existe)
-      const user = await prisma.user.findUnique({
-        where: { email },
+      const cleanEmail = email.trim().toLowerCase();
+
+      // Busca ignorando maiúsculas/minúsculas no Postgres
+      const user = await prisma.user.findFirst({
+        where: {
+          email: {
+            equals: cleanEmail,
+            mode: 'insensitive',
+          },
+        },
       });
 
-      if (!user) {
+      if (!user || user.password !== password) {
         return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
       }
 
-      // Ainda sem token, sem validação de seção
-      if (user.password !== password) {
-        return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
-      }
-
-      // Reposta com os dados do usuario com a cargo dele
       return res.json({
         user: {
           id: user.id,
           name: user.name,
           email: user.email,
-          role: user.role, // ADMIN, DRIVER, CAIXA
+          role: user.role,
         },
       });
     } catch (error) {
