@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Role } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { parseCoords, parseEventDate } from '../utils/location';
@@ -8,8 +8,15 @@ const prisma = new PrismaClient();
 // Chave secreta para gerar o token JWT (em produção, coloque isso no .env)
 const JWT_SECRET = process.env.JWT_SECRET || 'precobom_super_secret_key_2026';
 
+// Traduz o cargo vindo do frontend (em português) para o Enum do banco (em inglês)
+const getPrismaRole = (roleString?: string): Role => {
+  if (roleString === 'ADMIN') return Role.ADMIN;
+  if (roleString === 'CAIXA' || roleString === 'CASHIER') return Role.CASHIER;
+  return Role.DRIVER; // MOTORISTA é o padrão
+};
+
 export class UserController {
-async create(req: Request, res: Response) {
+  async create(req: Request, res: Response) {
     try {
       const { name, email, password, role } = req.body;
 
@@ -25,10 +32,11 @@ async create(req: Request, res: Response) {
           name,
           email,
           password: hashedPassword,
-          role: (role || 'MOTORISTA') as any, 
+          role: getPrismaRole(role), // Aplica a tradução para o Enum do Prisma
         },
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password: _, ...userWithoutPassword } = newUser;
       return res.status(201).json(userWithoutPassword);
     } catch (error) {
@@ -39,9 +47,8 @@ async create(req: Request, res: Response) {
 
   async list(req: Request, res: Response) {
     try {
-      // Retorna todos os usuários, mas omitindo a senha
       const users = await prisma.user.findMany({
-        select: { id: true, name: true, email: true, role: true, createdAt: true }
+        select: { id: true, name: true, email: true, role: true, createdAt: true },
       });
       return res.json(users);
     } catch (error) {
@@ -53,9 +60,9 @@ async create(req: Request, res: Response) {
   async getById(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const user = await prisma.user.findUnique({ 
+      const user = await prisma.user.findUnique({
         where: { id },
-        select: { id: true, name: true, email: true, role: true, createdAt: true }
+        select: { id: true, name: true, email: true, role: true, createdAt: true },
       });
 
       if (!user) return res.status(404).json({ error: 'Usuario não encontrado.' });
@@ -71,9 +78,15 @@ async create(req: Request, res: Response) {
       const { id } = req.params;
       const { name, email, password, role } = req.body;
 
-      const dataToUpdate: any = { name, email, role };
+      const dataToUpdate: { name?: string; email?: string; role?: Role; password?: string } = {
+        name,
+        email,
+      };
 
-      // Se a senha foi enviada na requisição de update, criptografa ela também
+      if (role) {
+        dataToUpdate.role = getPrismaRole(role);
+      }
+
       if (password) {
         dataToUpdate.password = await bcrypt.hash(password, 10);
       }
@@ -83,6 +96,7 @@ async create(req: Request, res: Response) {
         data: dataToUpdate,
       });
 
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password: _, ...userWithoutPassword } = updatedUser;
       return res.json(userWithoutPassword);
     } catch (error) {
@@ -156,7 +170,6 @@ async create(req: Request, res: Response) {
 
       const cleanEmail = email.trim().toLowerCase();
 
-      // Busca ignorando maiúsculas/minúsculas no Postgres
       const user = await prisma.user.findFirst({
         where: {
           email: {
@@ -166,25 +179,18 @@ async create(req: Request, res: Response) {
         },
       });
 
-      // Se o usuário não existir
       if (!user) {
         return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
       }
 
-      // 3. Compara a senha em texto (que veio do body) com o Hash (que está no banco)
       const isValidPassword = await bcrypt.compare(password, user.password);
       if (!isValidPassword) {
         return res.status(401).json({ error: 'E-mail ou senha incorretos.' });
       }
 
-      // 4. Gera o token JWT para a sessão (válido por 7 dias)
-      const token = jwt.sign(
-        { id: user.id, role: user.role },
-        JWT_SECRET,
-        { expiresIn: '7d' }
-      );
+      const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
 
-      // Remove a senha antes de devolver para o frontend
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       const { password: _, ...userWithoutPassword } = user;
 
       return res.json({
