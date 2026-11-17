@@ -6,6 +6,7 @@ generator client {
 datasource db {
   provider   = "postgresql"
   url        = env("DATABASE_URL")
+  directUrl  = env("DIRECT_URL")
   extensions = [postgis]
 }
 
@@ -52,6 +53,9 @@ model Delivery {
   paymentMethod String // CASH, PIX, CREDIT_CARD
   changeFor     Float?
   status        String  @default("PENDING") // PENDING, IN_TRANSIT, DELIVERED
+
+  // NOVO CAMPO: Detalhes extras e descrição da entrega para o Caixa/Motorista
+  description   String?
 
   createdAt DateTime @default(now())
 
