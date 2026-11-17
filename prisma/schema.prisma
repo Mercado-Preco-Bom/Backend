@@ -25,11 +25,22 @@ model User {
   createdAt DateTime @default(now())
   
   // Ultima localização do motorista
-  lastLatitude   Float?
-  lastLongitude  Float?
+  lastLatitude  Float?
+  lastLongitude Float?
   lastLocationAt DateTime?
 
   deliveries Delivery[] @relation("DriverDeliveries")
+  
+  // Histórico de quando o motorista furou a cerca e retornou à base
+  baseReturns DriverBaseReturn[]
+}
+
+// NOVO: Tabela para registrar o fim das viagens (quando ele volta pra loja)
+model DriverBaseReturn {
+  id        String   @id @default(uuid())
+  driverId  String
+  driver    User     @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  arrivedAt DateTime @default(now())
 }
 
 model Customer {
@@ -54,7 +65,7 @@ model Delivery {
   changeFor     Float?
   status        String  @default("PENDING") // PENDING, IN_TRANSIT, DELIVERED
 
-  // NOVO CAMPO: Detalhes extras e descrição da entrega para o Caixa/Motorista
+  // Detalhes extras e descrição da entrega para o Caixa/Motorista
   description   String?
 
   createdAt DateTime @default(now())
@@ -78,7 +89,7 @@ model Delivery {
   customer   Customer @relation(fields: [customerId], references: [id])
 
   driverId String?
-  driver   User?   @relation("DriverDeliveries", fields: [driverId], references: [id])
+  driver   User?    @relation("DriverDeliveries", fields: [driverId], references: [id])
 
   // Trajeto percorrido (pontos de GPS enquanto a entrega está em rota)
   trackPoints DeliveryTrackPoint[]

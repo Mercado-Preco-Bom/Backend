@@ -9,7 +9,7 @@ const DISCONNECTED_THRESHOLD_MS = 8 * 60 * 60 * 1000;
 export class AdminController {
   async getDashboard(req: Request, res: Response) {
     try {
-      // Define a data de hoje com horário
+      // Define a data de hoje com horário 00:00:00
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
 
@@ -34,6 +34,18 @@ export class AdminController {
           lastLatitude: true,
           lastLongitude: true,
           lastLocationAt: true,
+        },
+      });
+
+      // NOVO: Busca todo o histórico de retornos à base registrados pela Cerca Virtual hoje
+      const baseReturns = await prisma.driverBaseReturn.findMany({
+        where: {
+          arrivedAt: { gte: startOfDay },
+        },
+        orderBy: { arrivedAt: 'asc' },
+        select: {
+          driverId: true,
+          arrivedAt: true,
         },
       });
 
@@ -69,7 +81,7 @@ export class AdminController {
       // Armazena o timestamp atual para validar a conexão dos motoristas
       const now = Date.now();
 
-      // Monta a resposta JSON consolidada com métricas, status dos motoristas e histórico
+      // Monta a resposta JSON consolidada
       return res.json({
         metrics: {
           totalToday,
@@ -116,9 +128,10 @@ export class AdminController {
           };
         }),
         history: deliveries,
+        // NOVO: Adiciona o histórico de chegadas na base no pacote de dados do Painel
+        baseReturns,
       });
     } catch (error) {
-      // Captura e registra qualquer erro interno, retornando status 500
       console.error('Erro no AdminController:', error);
       return res.status(500).json({ error: 'Erro ao carregar dados do dashboard.' });
     }

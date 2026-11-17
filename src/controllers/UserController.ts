@@ -144,6 +144,27 @@ export class UserController {
     }
   }
 
+  // NOVO: Registra o momento em que a moto fura a Cerca Virtual do mercado
+  async arrivedAtBase(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+
+      const arrivedAt = req.body.arrivedAt ? new Date(req.body.arrivedAt) : new Date();
+
+      await prisma.driverBaseReturn.create({
+        data: {
+          driverId: id,
+          arrivedAt,
+        },
+      });
+
+      return res.status(201).json({ message: 'Retorno à base registrado com sucesso.' });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Erro ao registrar chegada na base.' });
+    }
+  }
+
   async disconnectDriver(req: Request, res: Response) {
     try {
       const { id } = req.params;

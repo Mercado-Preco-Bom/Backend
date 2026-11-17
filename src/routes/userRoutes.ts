@@ -21,6 +21,9 @@ router.get('/:id', userController.getById);
 // Rota PUT para atualizar a geolocalização em tempo real enviada pelo aplicativo do motorista
 router.put('/:id/location', userController.updateLocation);
 
+// NOVO: Rota POST disparada pela Cerca Virtual quando a moto chega num raio de 50m do mercado
+router.post('/:id/arrived-at-base', userController.arrivedAtBase);
+
 // Rota PUT para registrar a desconexão ou encerramento de sessão do motorista
 router.put('/:id/disconnect', userController.disconnectDriver);
 
