@@ -9,7 +9,7 @@ const prisma = new PrismaClient();
 const JWT_SECRET = process.env.JWT_SECRET || 'precobom_super_secret_key_2026';
 
 export class UserController {
-  async create(req: Request, res: Response) {
+async create(req: Request, res: Response) {
     try {
       const { name, email, password, role } = req.body;
 
@@ -18,21 +18,18 @@ export class UserController {
         return res.status(400).json({ error: 'Este e-mail já está em uso.' });
       }
 
-      // 1. Criptografa a senha antes de salvar no banco
       const hashedPassword = await bcrypt.hash(password, 10);
 
       const newUser = await prisma.user.create({
         data: {
           name,
           email,
-          password: hashedPassword, // Salva o hash gerado
-          role,
+          password: hashedPassword,
+          role: (role || 'MOTORISTA') as any, 
         },
       });
 
-      // 2. Remove a senha do objeto de retorno por segurança
       const { password: _, ...userWithoutPassword } = newUser;
-
       return res.status(201).json(userWithoutPassword);
     } catch (error) {
       console.error(error);
