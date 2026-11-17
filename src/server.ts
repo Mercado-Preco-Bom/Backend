@@ -10,7 +10,12 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Routes de usuarios
+// Rota de Health Check para nao deixar o backend no render cair
+app.get('/api/ping', (req, res) => {
+  res.status(200).json({ status: 'ok', message: 'Servidor PreçoBom acordado!' });
+});
+
+// Routes do sistema
 app.use('/api/users', userRoutes);
 app.use('/api', costumerRoutes);
 app.use('/api', deliveryRoutes);
