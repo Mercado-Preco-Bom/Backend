@@ -128,12 +128,48 @@ export class AdminController {
           };
         }),
         history: deliveries,
-        // NOVO: Adiciona o histórico de chegadas na base no pacote de dados do Painel
         baseReturns,
       });
     } catch (error) {
       console.error('Erro no AdminController:', error);
       return res.status(500).json({ error: 'Erro ao carregar dados do dashboard.' });
+    }
+  }
+
+  // Busca o histórico filtrado por data
+  async getHistory(req: Request, res: Response) {
+    try {
+      const { startDate, endDate } = req.query;
+
+      // Se não passar datas, puxa os últimos 30 dias por padrão
+      const start = startDate
+        ? new Date(startDate as string)
+        : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const end = endDate ? new Date(endDate as string) : new Date();
+
+      // Garante que o start pega do início do dia e o end vai até o final do dia
+      start.setHours(0, 0, 0, 0);
+      end.setHours(23, 59, 59, 999);
+
+      const history = await prisma.delivery.findMany({
+        where: {
+          createdAt: {
+            gte: start,
+            lte: end,
+          },
+          status: 'DELIVERED',
+        },
+        include: {
+          customer: true,
+          driver: { select: { id: true, name: true, email: true, role: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+
+      return res.json(history);
+    } catch (error) {
+      console.error('Erro ao buscar histórico:', error);
+      return res.status(500).json({ error: 'Erro ao carregar histórico.' });
     }
   }
 }
