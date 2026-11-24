@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { parseCoords, parseEventDate, secondsBetween, toNumber } from '../utils/location';
+import { buildPaymentData } from '../utils/paymentFields';
 
 const prisma = new PrismaClient();
 
@@ -40,10 +41,10 @@ function durationInfo(startedAt: Date | null, finishedAt: Date | null) {
 }
 
 export class DeliveryController {
-  // POST - CRIANDO NOVA ENTREGA
   async create(req: Request, res: Response) {
     try {
       const { boxCount, paymentMethod, changeFor, customerId, driverId, description } = req.body;
+      const payment = buildPaymentData(req.body);
 
       const assignment = driverId ? await buildAssignmentData(driverId) : {};
 
@@ -55,6 +56,8 @@ export class DeliveryController {
           customerId,
           driverId,
           description,
+          isPaid: payment.isPaid ?? false,
+          amount: payment.amount ?? null,
           ...assignment,
         },
       });
@@ -66,7 +69,6 @@ export class DeliveryController {
     }
   }
 
-  // GET - LISTAR TODAS AS ENTREGAS
   async list(req: Request, res: Response) {
     try {
       const deliveries = await prisma.delivery.findMany({
@@ -82,7 +84,6 @@ export class DeliveryController {
     }
   }
 
-  // PUT - Motorista inicia a entrega
   async start(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -156,7 +157,6 @@ export class DeliveryController {
     }
   }
 
-  // PUT - Motorista finaliza a entrega
   async finish(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -224,7 +224,6 @@ export class DeliveryController {
     }
   }
 
-  // POST - App do motorista envia os pontos de GPS enquanto a entrega está em rota
   async track(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -242,7 +241,6 @@ export class DeliveryController {
         return res.status(404).json({ error: 'Entrega não encontrada.' });
       }
 
-      // Só guarda trajeto de entrega em rota
       if (delivery.status !== 'IN_TRANSIT') {
         return res.json({ saved: 0 });
       }
@@ -299,7 +297,6 @@ export class DeliveryController {
     }
   }
 
-  // GET - Linha do tempo completa da entrega (para o painel admin)
   async tracking(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -348,7 +345,6 @@ export class DeliveryController {
     }
   }
 
-  // GET - Listar Entregas por ID
   async getById(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -368,7 +364,6 @@ export class DeliveryController {
     }
   }
 
-  // DELETE - Deletar Entrega
   async delete(req: Request, res: Response) {
     try {
       const { id } = req.params;
@@ -381,15 +376,26 @@ export class DeliveryController {
     }
   }
 
-  // PUT - Atualiza a entrega, como adicionar/trocar motorista
   async update(req: Request, res: Response) {
     try {
       const { id } = req.params;
       const { boxCount, paymentMethod, changeFor, status, customerId, driverId, description } =
         req.body;
+      const payment = buildPaymentData(req.body);
 
-      const assignment = {};
-      // ... (mantenha a lógica do assignment intacta)
+      const existing = await prisma.delivery.findUnique({
+        where: { id },
+        select: { driverId: true, assignedAt: true },
+      });
+      if (!existing) {
+        return res.status(404).json({ error: 'Entrega não encontrada.' });
+      }
+
+      const shouldAssign =
+        typeof driverId === 'string' &&
+        driverId !== '' &&
+        (driverId !== existing.driverId || !existing.assignedAt);
+      const assignment = shouldAssign ? await buildAssignmentData(driverId) : {};
 
       const updatedDelivery = await prisma.delivery.update({
         where: { id },
@@ -401,6 +407,7 @@ export class DeliveryController {
           customerId,
           driverId,
           description,
+          ...payment,
           ...assignment,
         },
       });

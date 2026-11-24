@@ -9,11 +9,9 @@ const DISCONNECTED_THRESHOLD_MS = 8 * 60 * 60 * 1000;
 export class AdminController {
   async getDashboard(req: Request, res: Response) {
     try {
-      // Define a data de hoje com horário 00:00:00
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
 
-      // Busca no banco todas as entregas criadas hoje OU que ainda não foram finalizadas
       const deliveries = await prisma.delivery.findMany({
         where: {
           OR: [{ createdAt: { gte: startOfDay } }, { status: { not: 'DELIVERED' } }],
@@ -25,7 +23,6 @@ export class AdminController {
         orderBy: { createdAt: 'desc' },
       });
 
-      // Busca todos os usuários cadastrados como motoristas (DRIVER)
       const drivers = await prisma.user.findMany({
         where: { role: 'DRIVER' },
         select: {
@@ -37,7 +34,6 @@ export class AdminController {
         },
       });
 
-      // NOVO: Busca todo o histórico de retornos à base registrados pela Cerca Virtual hoje
       const baseReturns = await prisma.driverBaseReturn.findMany({
         where: {
           arrivedAt: { gte: startOfDay },
@@ -49,18 +45,15 @@ export class AdminController {
         },
       });
 
-      // Calcula as métricas básicas de quantidade de entregas do dia
       const totalToday = deliveries.length;
       const completed = deliveries.filter((d) => d.status === 'DELIVERED').length;
       const pending = totalToday - completed;
 
-      // Função auxiliar para converter milissegundos em minutos arredondados
       const avgMinutes = (values: number[]) =>
         values.length === 0
           ? 0
           : Math.round(values.reduce((sum, v) => sum + v, 0) / values.length / 60000);
 
-      // Calcula o tempo de ociosidade (diferença entre a atribuição e o início efetivo pelo motorista)
       const idleDurations = deliveries
         .filter((d) => d.assignedAt && d.startedAt)
         .map(
@@ -69,7 +62,6 @@ export class AdminController {
         )
         .filter((ms) => ms >= 0);
 
-      // Calcula a duração total do percurso (diferença entre o início e a finalização da entrega)
       const routeDurations = deliveries
         .filter((d) => d.startedAt && d.finishedAt)
         .map(
@@ -78,10 +70,8 @@ export class AdminController {
         )
         .filter((ms) => ms >= 0);
 
-      // Armazena o timestamp atual para validar a conexão dos motoristas
       const now = Date.now();
 
-      // Monta a resposta JSON consolidada
       return res.json({
         metrics: {
           totalToday,
@@ -91,12 +81,10 @@ export class AdminController {
           avgRouteTime: avgMinutes(routeDurations),
         },
         drivers: drivers.map((driver) => {
-          // Identifica se o motorista está com alguma entrega ativa e em andamento
           const inTransit = deliveries.find(
             (d) => d.driverId === driver.id && d.status === 'IN_TRANSIT' && d.startedAt !== null,
           );
 
-          // Valida o estado de conexão do motorista com base no tempo do último ping de GPS
           let connectionStatus: 'ONLINE' | 'SINAL_PERDIDO' | 'DESCONECTADO' = 'DESCONECTADO';
           if (driver.lastLocationAt && driver.lastLocationAt.getTime() > 1000) {
             const ageMs = now - driver.lastLocationAt.getTime();
@@ -107,7 +95,6 @@ export class AdminController {
             }
           }
 
-          // Retorna o objeto formatado de cada motorista para o frontend
           return {
             id: driver.id,
             name: driver.name,
@@ -136,20 +123,27 @@ export class AdminController {
     }
   }
 
-  // Busca o histórico filtrado por data
   async getHistory(req: Request, res: Response) {
     try {
-      const { startDate, endDate } = req.query;
+      const { startDate, endDate, status } = req.query;
 
-      // Se não passar datas, puxa os últimos 30 dias por padrão
       const start = startDate
         ? new Date(startDate as string)
         : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
       const end = endDate ? new Date(endDate as string) : new Date();
 
-      // Garante que o start pega do início do dia e o end vai até o final do dia
       start.setHours(0, 0, 0, 0);
       end.setHours(23, 59, 59, 999);
+
+      let statusWhere: { status?: string } = { status: 'DELIVERED' };
+      if (status === 'ALL') {
+        statusWhere = {};
+      } else if (
+        typeof status === 'string' &&
+        ['PENDING', 'IN_TRANSIT', 'DELIVERED'].includes(status)
+      ) {
+        statusWhere = { status };
+      }
 
       const history = await prisma.delivery.findMany({
         where: {
@@ -157,7 +151,7 @@ export class AdminController {
             gte: start,
             lte: end,
           },
-          status: 'DELIVERED',
+          ...statusWhere,
         },
         include: {
           customer: true,

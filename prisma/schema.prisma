@@ -24,18 +24,15 @@ model User {
   role      Role
   createdAt DateTime @default(now())
   
-  // Ultima localização do motorista
   lastLatitude  Float?
   lastLongitude Float?
   lastLocationAt DateTime?
 
   deliveries Delivery[] @relation("DriverDeliveries")
   
-  // Histórico de quando o motorista furou a cerca e retornou à base
   baseReturns DriverBaseReturn[]
 }
 
-// NOVO: Tabela para registrar o fim das viagens (quando ele volta pra loja)
 model DriverBaseReturn {
   id        String   @id @default(uuid())
   driverId  String
@@ -61,26 +58,24 @@ model Customer {
 model Delivery {
   id            String  @id @default(uuid())
   boxCount      Int
-  paymentMethod String // CASH, PIX, CREDIT_CARD
+  paymentMethod String
   changeFor     Float?
-  status        String  @default("PENDING") // PENDING, IN_TRANSIT, DELIVERED
+  isPaid        Boolean @default(false)
+  amount        Float?
+  status        String  @default("PENDING")
 
-  // Detalhes extras e descrição da entrega para o Caixa/Motorista
   description   String?
 
   createdAt DateTime @default(now())
 
-  // 1) ATRIBUIÇÃO: quando a entrega foi entregue a esse motorista e onde ele estava
   assignedAt        DateTime?
   assignedLatitude  Float?
   assignedLongitude Float?
 
-  // 2) INÍCIO: quando o motorista apertou "Iniciar" e onde estava
   startedAt      DateTime?
   startLatitude  Float?
   startLongitude Float?
 
-  // 3) FIM: quando o motorista apertou "Finalizar" e onde estava
   finishedAt   DateTime?
   endLatitude  Float?
   endLongitude Float?
@@ -91,7 +86,6 @@ model Delivery {
   driverId String?
   driver   User?    @relation("DriverDeliveries", fields: [driverId], references: [id])
 
-  // Trajeto percorrido (pontos de GPS enquanto a entrega está em rota)
   trackPoints DeliveryTrackPoint[]
 }
 
@@ -102,11 +96,11 @@ model DeliveryTrackPoint {
 
   latitude  Float
   longitude Float
-  speed     Float? // m/s
-  heading   Float? // graus
-  accuracy  Float? // metros
+  speed     Float?
+  heading   Float?
+  accuracy  Float?
 
-  recordedAt DateTime // hora em que o GPS do celular registrou o ponto
+  recordedAt DateTime
 
   @@index([deliveryId, recordedAt])
 }
