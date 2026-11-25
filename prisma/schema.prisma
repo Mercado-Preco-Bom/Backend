@@ -28,9 +28,31 @@ model User {
   lastLongitude Float?
   lastLocationAt DateTime?
 
+  // Estado da cerca virtual do mercado (calculado no servidor).
+  // null = ainda não sabemos; true = dentro do raio; false = fora do raio.
+  atBase      Boolean?
+  atBaseSince DateTime?
+
   deliveries Delivery[] @relation("DriverDeliveries")
-  
+
   baseReturns DriverBaseReturn[]
+  trips       DriverTrip[]
+}
+
+// Uma "saída" do motorista: começa quando ele sai do raio do mercado e
+// termina quando ele volta para dentro do raio.
+model DriverTrip {
+  id         String    @id @default(uuid())
+  driverId   String
+  driver     User      @relation(fields: [driverId], references: [id], onDelete: Cascade)
+  leftAt     DateTime
+  returnedAt DateTime?
+  // true quando a saída foi deduzida (sem GPS), ex.: pelo horário de início da entrega
+  estimated  Boolean   @default(false)
+
+  deliveries Delivery[]
+
+  @@index([driverId, leftAt])
 }
 
 model DriverBaseReturn {
@@ -44,11 +66,19 @@ model Customer {
   id           String   @id @default(uuid())
   name         String
   phone        String?
-  street       String
-  number       String
+  street       String?
+  number       String?
   neighborhood String
   reference    String?
   createdAt    DateTime @default(now())
+
+  // Sítio / zona rural: endereço formal não é obrigatório
+  isRural Boolean @default(false)
+
+  // Localização marcada pelo motorista no local (ponto exato do cliente)
+  latitude          Float?
+  longitude         Float?
+  locationUpdatedAt DateTime?
 
   coordinates Unsupported("geometry(Point, 4326)")?
 
@@ -79,6 +109,13 @@ model Delivery {
   finishedAt   DateTime?
   endLatitude  Float?
   endLongitude Float?
+
+  canceledAt   DateTime?
+  cancelReason String?
+
+  // Saída (viagem) do motorista à qual esta entrega pertence
+  tripId String?
+  trip   DriverTrip? @relation(fields: [tripId], references: [id], onDelete: SetNull)
 
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id])

@@ -12,6 +12,8 @@ router.get('/deliveries', deliveryController.list);
 router.put('/deliveries/:id/start', deliveryController.start);
 //Rota para finalizar a entrega
 router.put('/deliveries/:id/finish', deliveryController.finish);
+// Cancelar a entrega (caixa)
+router.put('/deliveries/:id/cancel', deliveryController.cancel);
 // Motorista envia os pontos de GPS do trajeto (enquanto em rota)
 router.post('/deliveries/:id/track', deliveryController.track);
 // Linha do tempo completa da entrega para o admin (atribuição, início, fim e trajeto)

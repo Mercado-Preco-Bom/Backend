@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { PrismaClient } from '@prisma/client';
 import { parseCoords, parseEventDate, secondsBetween, toNumber } from '../utils/location';
 import { buildPaymentData } from '../utils/paymentFields';
+import { currentTripIdFor, processDriverPosition } from '../utils/baseTrips';
 
 const prisma = new PrismaClient();
 
@@ -47,6 +48,8 @@ export class DeliveryController {
       const payment = buildPaymentData(req.body);
 
       const assignment = driverId ? await buildAssignmentData(driverId) : {};
+      // se o motorista já está na rua, a entrega nova recebe a saída dele
+      const tripId = await currentTripIdFor(driverId);
 
       const newDelivery = await prisma.delivery.create({
         data: {
@@ -59,6 +62,7 @@ export class DeliveryController {
           isPaid: payment.isPaid ?? false,
           amount: payment.amount ?? null,
           ...assignment,
+          ...(tripId ? { tripId } : {}),
         },
       });
 
@@ -104,6 +108,10 @@ export class DeliveryController {
         return res.status(409).json({ error: 'Esta entrega já foi finalizada.' });
       }
 
+      if (delivery.status === 'CANCELED') {
+        return res.status(409).json({ error: 'Esta entrega foi cancelada.' });
+      }
+
       if (delivery.status === 'IN_TRANSIT' && delivery.startedAt !== null) {
         return res.json({
           message: 'Entrega já estava em rota.',
@@ -122,11 +130,14 @@ export class DeliveryController {
             assignedLongitude: coords?.longitude ?? null,
           };
 
+      const tripId = delivery.tripId ?? (await currentTripIdFor(effectiveDriverId));
+
       const updated = await prisma.delivery.update({
         where: { id },
         data: {
           status: 'IN_TRANSIT',
           driverId: effectiveDriverId,
+          ...(tripId ? { tripId } : {}),
           startedAt,
           startLatitude: coords?.latitude ?? null,
           startLongitude: coords?.longitude ?? null,
@@ -144,6 +155,7 @@ export class DeliveryController {
             lastLocationAt: startedAt,
           },
         });
+        await processDriverPosition(effectiveDriverId, coords, startedAt);
       }
 
       return res.json({
@@ -181,6 +193,10 @@ export class DeliveryController {
         });
       }
 
+      if (delivery.status === 'CANCELED') {
+        return res.status(409).json({ error: 'Esta entrega foi cancelada.' });
+      }
+
       if (!delivery.startedAt) {
         return res.status(409).json({ error: 'A entrega ainda não foi iniciada.' });
       }
@@ -210,6 +226,7 @@ export class DeliveryController {
             lastLocationAt: finishedAt,
           },
         });
+        await processDriverPosition(delivery.driverId, coords, finishedAt);
       }
 
       return res.json({
@@ -227,7 +244,7 @@ export class DeliveryController {
   async track(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { points } = req.body;
+      const { points, driverId: reportedDriverId } = req.body;
 
       if (!Array.isArray(points)) {
         return res.status(400).json({ error: 'Envie a lista "points".' });
@@ -243,6 +260,11 @@ export class DeliveryController {
 
       if (delivery.status !== 'IN_TRANSIT') {
         return res.json({ saved: 0 });
+      }
+
+      // a entrega foi passada para outro motorista: ignora o GPS do antigo
+      if (reportedDriverId && delivery.driverId && reportedDriverId !== delivery.driverId) {
+        return res.json({ saved: 0, reassigned: true });
       }
 
       const valid = points
@@ -288,6 +310,12 @@ export class DeliveryController {
             lastLocationAt: last.recordedAt,
           },
         });
+        await processDriverPosition(
+          delivery.driverId,
+          { latitude: last.latitude, longitude: last.longitude },
+          last.recordedAt,
+          last.accuracy,
+        );
       }
 
       return res.json({ saved: valid.length });
@@ -325,19 +353,26 @@ export class DeliveryController {
         assigned: point(delivery.assignedAt, delivery.assignedLatitude, delivery.assignedLongitude),
         started: point(delivery.startedAt, delivery.startLatitude, delivery.startLongitude),
         finished: point(delivery.finishedAt, delivery.endLatitude, delivery.endLongitude),
+        canceledAt: delivery.canceledAt,
+        cancelReason: delivery.cancelReason,
         waitingSeconds:
           delivery.assignedAt && delivery.startedAt
             ? secondsBetween(delivery.assignedAt, delivery.startedAt)
             : null,
         ...durationInfo(delivery.startedAt, delivery.finishedAt),
-        path: delivery.trackPoints.map((p) => ({
-          latitude: p.latitude,
-          longitude: p.longitude,
-          speed: p.speed,
-          heading: p.heading,
-          accuracy: p.accuracy,
-          recordedAt: p.recordedAt,
-        })),
+        // pontos anteriores ao início atual pertencem a um motorista/tentativa anterior
+        path: delivery.trackPoints
+          .filter(
+            (p) => !!delivery.startedAt && p.recordedAt.getTime() >= delivery.startedAt.getTime(),
+          )
+          .map((p) => ({
+            latitude: p.latitude,
+            longitude: p.longitude,
+            speed: p.speed,
+            heading: p.heading,
+            accuracy: p.accuracy,
+            recordedAt: p.recordedAt,
+          })),
       });
     } catch (error) {
       console.error(error);
@@ -376,26 +411,110 @@ export class DeliveryController {
     }
   }
 
+  async cancel(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const reason =
+        typeof req.body?.reason === 'string' && req.body.reason.trim() !== ''
+          ? req.body.reason.trim().slice(0, 300)
+          : null;
+
+      const delivery = await prisma.delivery.findUnique({ where: { id } });
+      if (!delivery) return res.status(404).json({ error: 'Entrega não encontrada.' });
+
+      if (delivery.status === 'DELIVERED') {
+        return res
+          .status(409)
+          .json({ error: 'Esta entrega já foi finalizada e não pode ser cancelada.' });
+      }
+      if (delivery.status === 'CANCELED') {
+        return res.json(delivery);
+      }
+
+      const canceled = await prisma.delivery.update({
+        where: { id },
+        data: { status: 'CANCELED', canceledAt: new Date(), cancelReason: reason },
+        include: { customer: true, driver: { select: driverSelect } },
+      });
+      return res.json(canceled);
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ error: 'Erro ao cancelar a entrega.' });
+    }
+  }
+
   async update(req: Request, res: Response) {
     try {
       const { id } = req.params;
-      const { boxCount, paymentMethod, changeFor, status, customerId, driverId, description } =
-        req.body;
+      const { boxCount, paymentMethod, changeFor, customerId, description } = req.body;
       const payment = buildPaymentData(req.body);
 
-      const existing = await prisma.delivery.findUnique({
-        where: { id },
-        select: { driverId: true, assignedAt: true },
-      });
+      const existing = await prisma.delivery.findUnique({ where: { id } });
       if (!existing) {
         return res.status(404).json({ error: 'Entrega não encontrada.' });
       }
+      if (existing.status === 'CANCELED') {
+        return res
+          .status(409)
+          .json({ error: 'Esta entrega foi cancelada e não pode ser editada.' });
+      }
 
-      const shouldAssign =
-        typeof driverId === 'string' &&
-        driverId !== '' &&
-        (driverId !== existing.driverId || !existing.assignedAt);
-      const assignment = shouldAssign ? await buildAssignmentData(driverId) : {};
+      if (customerId !== undefined) {
+        const customer = await prisma.customer.findUnique({
+          where: { id: customerId },
+          select: { id: true },
+        });
+        if (!customer) return res.status(400).json({ error: 'Cliente não encontrado.' });
+      }
+
+      // ---- troca / remoção de motorista ----
+      const driverChange: Record<string, unknown> = {};
+      if ('driverId' in req.body) {
+        const newDriverId: string | null =
+          typeof req.body.driverId === 'string' && req.body.driverId !== ''
+            ? req.body.driverId
+            : null;
+
+        const changed = newDriverId !== existing.driverId;
+        if (changed && existing.status === 'DELIVERED') {
+          return res
+            .status(409)
+            .json({ error: 'Entrega já finalizada: não dá para trocar o motorista.' });
+        }
+
+        if (newDriverId) {
+          const driver = await prisma.user.findUnique({
+            where: { id: newDriverId },
+            select: { role: true },
+          });
+          if (!driver || driver.role !== 'DRIVER') {
+            return res.status(400).json({ error: 'Motorista inválido.' });
+          }
+        }
+
+        if (changed) {
+          driverChange.driverId = newDriverId;
+          // volta a "aguardando saída" para o novo motorista (o início do antigo não vale mais)
+          driverChange.startedAt = null;
+          driverChange.startLatitude = null;
+          driverChange.startLongitude = null;
+          driverChange.tripId = await currentTripIdFor(newDriverId);
+          if (newDriverId) {
+            Object.assign(driverChange, await buildAssignmentData(newDriverId), {
+              status: 'IN_TRANSIT',
+            });
+          } else {
+            Object.assign(driverChange, {
+              status: 'PENDING',
+              assignedAt: null,
+              assignedLatitude: null,
+              assignedLongitude: null,
+            });
+          }
+        } else if (newDriverId && !existing.assignedAt) {
+          Object.assign(driverChange, await buildAssignmentData(newDriverId));
+        }
+      }
 
       const updatedDelivery = await prisma.delivery.update({
         where: { id },
@@ -403,13 +522,12 @@ export class DeliveryController {
           boxCount,
           paymentMethod,
           changeFor,
-          status,
           customerId,
-          driverId,
           description,
           ...payment,
-          ...assignment,
+          ...driverChange,
         },
+        include: { customer: true, driver: { select: driverSelect } },
       });
 
       return res.json(updatedDelivery);

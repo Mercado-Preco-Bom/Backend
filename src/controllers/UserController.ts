@@ -2,7 +2,8 @@ import { Request, Response } from 'express';
 import { PrismaClient, Role } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { parseCoords, parseEventDate } from '../utils/location';
+import { parseCoords, parseEventDate, toNumber } from '../utils/location';
+import { processDriverPosition } from '../utils/baseTrips';
 
 const prisma = new PrismaClient();
 // Chave secreta para gerar o token JWT (em produção, coloque isso no .env)
@@ -137,6 +138,9 @@ export class UserController {
         },
       });
 
+      // Cerca virtual: o servidor decide se o motorista saiu/voltou ao mercado
+      await processDriverPosition(id, coords, lastLocationAt, toNumber(req.body.accuracy));
+
       return res.status(204).send();
     } catch (error) {
       console.error(error);
@@ -144,20 +148,22 @@ export class UserController {
     }
   }
 
-  // NOVO: Registra o momento em que a moto fura a Cerca Virtual do mercado
+  // Mantida por compatibilidade com versões antigas do app: a cerca virtual agora é calculada
+  // no servidor a cada /location. Aqui só fechamos a saída em aberto, se houver.
   async arrivedAtBase(req: Request, res: Response) {
     try {
       const { id } = req.params;
-
-      const arrivedAt = req.body.arrivedAt ? new Date(req.body.arrivedAt) : new Date();
-
-      await prisma.driverBaseReturn.create({
-        data: {
-          driverId: id,
-          arrivedAt,
-        },
-      });
-
+      const arrivedAt = parseEventDate(req.body.arrivedAt);
+      const open = await prisma.driverTrip.findFirst({ where: { driverId: id, returnedAt: null } });
+      if (open) {
+        await prisma.driverTrip.update({
+          where: { id: open.id },
+          data: {
+            returnedAt: arrivedAt.getTime() < open.leftAt.getTime() ? open.leftAt : arrivedAt,
+          },
+        });
+      }
+      await prisma.user.update({ where: { id }, data: { atBase: true, atBaseSince: arrivedAt } });
       return res.status(201).json({ message: 'Retorno à base registrado com sucesso.' });
     } catch (error) {
       console.error(error);

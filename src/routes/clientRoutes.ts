@@ -12,6 +12,8 @@ router.get('/customers', customerController.list);
 router.get('/customers/:id', customerController.getById);
 // Rota para Atualizar clientes
 router.put('/customers/:id', customerController.update);
+// Motorista marca a localização exata do cliente (sítio etc.)
+router.put('/customers/:id/location', customerController.setLocation);
 // Rota para deletar Clientes
 router.delete('/customers/:id', customerController.delete);
 

@@ -14,7 +14,10 @@ export class AdminController {
 
       const deliveries = await prisma.delivery.findMany({
         where: {
-          OR: [{ createdAt: { gte: startOfDay } }, { status: { not: 'DELIVERED' } }],
+          OR: [
+            { createdAt: { gte: startOfDay } },
+            { status: { notIn: ['DELIVERED', 'CANCELED'] } },
+          ],
         },
         include: {
           customer: true,
@@ -34,19 +37,27 @@ export class AdminController {
         },
       });
 
-      const baseReturns = await prisma.driverBaseReturn.findMany({
+      // Saídas do motorista (do raio do mercado até a volta). Inclui as de hoje, as em aberto
+      // e as que ainda têm entregas na lista.
+      const tripIds = [...new Set(deliveries.map((d) => d.tripId).filter((t): t is string => !!t))];
+      const trips = await prisma.driverTrip.findMany({
         where: {
-          arrivedAt: { gte: startOfDay },
+          OR: [{ leftAt: { gte: startOfDay } }, { returnedAt: null }, { id: { in: tripIds } }],
         },
-        orderBy: { arrivedAt: 'asc' },
-        select: {
-          driverId: true,
-          arrivedAt: true,
-        },
+        orderBy: { leftAt: 'asc' },
+        select: { id: true, driverId: true, leftAt: true, returnedAt: true, estimated: true },
       });
 
-      const totalToday = deliveries.length;
-      const completed = deliveries.filter((d) => d.status === 'DELIVERED').length;
+      const driversBase = await prisma.user.findMany({
+        where: { role: 'DRIVER' },
+        select: { id: true, atBase: true },
+      });
+      const atBaseById = new Map(driversBase.map((d) => [d.id, d.atBase]));
+
+      const active = deliveries.filter((d) => d.status !== 'CANCELED');
+      const canceled = deliveries.length - active.length;
+      const totalToday = active.length;
+      const completed = active.filter((d) => d.status === 'DELIVERED').length;
       const pending = totalToday - completed;
 
       const avgMinutes = (values: number[]) =>
@@ -54,7 +65,7 @@ export class AdminController {
           ? 0
           : Math.round(values.reduce((sum, v) => sum + v, 0) / values.length / 60000);
 
-      const idleDurations = deliveries
+      const idleDurations = active
         .filter((d) => d.assignedAt && d.startedAt)
         .map(
           (d) =>
@@ -62,7 +73,7 @@ export class AdminController {
         )
         .filter((ms) => ms >= 0);
 
-      const routeDurations = deliveries
+      const routeDurations = active
         .filter((d) => d.startedAt && d.finishedAt)
         .map(
           (d) =>
@@ -77,6 +88,7 @@ export class AdminController {
           totalToday,
           completed,
           pending,
+          canceled,
           avgIdleTime: avgMinutes(idleDurations),
           avgRouteTime: avgMinutes(routeDurations),
         },
@@ -84,6 +96,18 @@ export class AdminController {
           const inTransit = deliveries.find(
             (d) => d.driverId === driver.id && d.status === 'IN_TRANSIT' && d.startedAt !== null,
           );
+          const queuedCount = deliveries.filter(
+            (d) => d.driverId === driver.id && d.status === 'IN_TRANSIT' && d.startedAt === null,
+          ).length;
+          const openTrip =
+            trips.find((t) => t.driverId === driver.id && t.returnedAt === null) ?? null;
+
+          // EM_ROTA: entrega iniciada | VOLTANDO: fora do mercado sem entrega em andamento
+          // NO_MERCADO: dentro do raio | INDEFINIDO: ainda sem posição para saber
+          let status: 'EM_ROTA' | 'VOLTANDO' | 'NO_MERCADO' | 'INDEFINIDO' = 'INDEFINIDO';
+          if (inTransit) status = 'EM_ROTA';
+          else if (openTrip) status = 'VOLTANDO';
+          else if (atBaseById.get(driver.id) === true) status = 'NO_MERCADO';
 
           let connectionStatus: 'ONLINE' | 'SINAL_PERDIDO' | 'DESCONECTADO' = 'DESCONECTADO';
           if (driver.lastLocationAt && driver.lastLocationAt.getTime() > 1000) {
@@ -98,7 +122,9 @@ export class AdminController {
           return {
             id: driver.id,
             name: driver.name,
-            status: inTransit ? 'EM_ROTA' : 'DISPONIVEL',
+            status,
+            queuedCount,
+            openTripLeftAt: openTrip?.leftAt ?? null,
             connectionStatus,
             currentDelivery: inTransit || null,
             lastLocation:
@@ -115,7 +141,7 @@ export class AdminController {
           };
         }),
         history: deliveries,
-        baseReturns,
+        trips,
       });
     } catch (error) {
       console.error('Erro no AdminController:', error);
@@ -140,7 +166,7 @@ export class AdminController {
         statusWhere = {};
       } else if (
         typeof status === 'string' &&
-        ['PENDING', 'IN_TRANSIT', 'DELIVERED'].includes(status)
+        ['PENDING', 'IN_TRANSIT', 'DELIVERED', 'CANCELED'].includes(status)
       ) {
         statusWhere = { status };
       }
